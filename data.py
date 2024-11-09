@@ -3,7 +3,9 @@ import torch
 
 
 class CustomDataset:
-    def __init__(self, categorical_data, continuous_data, categoricalDims, continuousDim):
+    def __init__(
+        self, categorical_data, continuous_data, categoricalDims, continuousDim
+    ):
         """
         categorical_data: list of numpy arrays, one for each categorical feature
         continuous_data: numpy array of continuous features
@@ -53,6 +55,8 @@ def getDataset(numRows):
     continuousData = np.random.randn(numRows, continuousDim)
 
     # Create dataset and dataloader
-    dataset: CustomDataset = CustomDataset(categoricalData, continuousData, categoricalDims, continuousDim)
+    dataset: CustomDataset = CustomDataset(
+        categoricalData, continuousData, categoricalDims, continuousDim
+    )
 
     return dataset

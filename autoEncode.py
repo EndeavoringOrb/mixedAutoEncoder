@@ -1,13 +1,12 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
+from data import CustomDataset, getDataset
+from line_profiler import profile
 from time import perf_counter
 from tqdm import tqdm, trange
-from line_profiler import profile
+import torch.optim as optim
+import torch.nn as nn
 import random
-
-from data import CustomDataset, getDataset
+import torch
+import os
 
 profile.disable()
 
@@ -115,7 +114,14 @@ class MixedAutoencoder(nn.Module):
 
 
 @profile
-def trainEncoder():
+def trainModel():
+    runNumber = (
+        max(int(item) for item in os.listdir("trainingRuns")) + 1
+        if len(os.listdir("trainingRuns")) > 0
+        else 0
+    )
+    os.makedirs(f"trainingRuns/{runNumber}/models")
+
     for epoch in range(numEpochs):
         total_loss = 0
         dataset.shuffle()
@@ -154,42 +160,7 @@ def trainEncoder():
             f"Epoch [{epoch+1}/{numEpochs}], Average Loss: {avg_loss:.4f}, {int(numDataRows/elapsed):,} rows/sec"
         )
 
-        torch.save(model, "model.pt")
-
-
-@torch.no_grad
-def trainClusters():
-    # Get all points
-    numBatches = dataset.numBatches(batchSize)
-    points = []
-    for cat_inputs, cont_inputs in tqdm(
-        dataset.iter(batchSize), desc=f"Getting Points", total=numBatches
-    ):
-        # Move inputs to device
-        cat_inputs = cat_inputs.to(device)
-        cont_inputs = cont_inputs.to(device)
-
-        # Forward pass
-        out = model.encode(cat_inputs, cont_inputs)
-
-        points.append(out)
-    points = torch.cat(points)
-
-    # Initialize centroids randomly
-    startPointIndices = random.sample(range(len(points)), numClusters)
-    centroids = points[startPointIndices]
-
-    for _ in trange(numClusteringIters, desc="Clustering Data"):
-        # Calculate distances from data points to centroids
-        distances = torch.cdist(points, centroids)
-
-        # Assign each data point to the closest centroid
-        _, labels = torch.min(distances, dim=1)
-
-        # Update centroids by taking the mean of data points assigned to each centroid
-        for i in range(numClusters):
-            if torch.sum(labels == i) > 0:
-                centroids[i] = torch.mean(points[labels == i], dim=0)
+        torch.save(model, f"trainingRuns/{runNumber}/models/E{epoch+1}.pt")
 
 
 # Example usage:
@@ -231,7 +202,7 @@ if __name__ == "__main__":
     )
     print(f"Model has {sum(p.numel() for p in model.parameters()):,} parameters")
 
-    # Train model
+    # Initialize optimizer and loss functions
     optimizer = optim.Adam(model.parameters(), lr=learningRate)
     cat_criterion = nn.CrossEntropyLoss()
     cont_criterion = nn.MSELoss()
@@ -241,6 +212,7 @@ if __name__ == "__main__":
 
     model = model.to(device)
 
-    trainEncoder()
+    # Train model
+    trainModel()
 
     print(f"Finished")

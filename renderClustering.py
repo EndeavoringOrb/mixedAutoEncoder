@@ -1,12 +1,15 @@
 from autoEncode import CustomDataset, MixedAutoencoder
 from data import CustomDataset, getDataset
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
 from tqdm import tqdm, trange
 import random
 import torch
+import os
 
 
-@torch.no_grad()
-def trainClustersRender():
+@torch.no_grad
+def trainClusters():
     # Get all points
     numBatches = dataset.numBatches(batchSize)
     points = []
@@ -19,64 +22,15 @@ def trainClustersRender():
 
         # Forward pass
         out = model.encode(cat_inputs, cont_inputs)
+
         points.append(out)
     points = torch.cat(points)
-
-    # For visualization: Use PCA to reduce dimensionality to 2D if needed
-    from sklearn.decomposition import PCA
-    import matplotlib.pyplot as plt
-
-    # Perform PCA if dimensions > 2
-    if points.shape[1] > 2:
-        pca = PCA(n_components=2)
-        points_2d = pca.fit_transform(points.cpu().numpy())
-        points_2d = torch.tensor(points_2d, device=device)
-    else:
-        points_2d = points
-
-    # Parameters for visualization
-    num_sample_points = min(
-        numClusteringRenderPoints, len(points)
-    )  # Adjust based on your needs
-    sample_indices = torch.randperm(len(points))[:num_sample_points]
 
     # Initialize centroids randomly
     startPointIndices = random.sample(range(len(points)), numClusters)
     centroids = points[startPointIndices]
-    if points.shape[1] > 2:
-        centroids_2d = torch.tensor(
-            pca.transform(centroids.cpu().numpy()), device=device
-        )
-    else:
-        centroids_2d = centroids
 
-    # Create output directory for plots
-    import os
-
-    os.makedirs("clustering_progress", exist_ok=True)
-
-    # Plot initial state
-    plt.figure(figsize=(10, 10))
-    plt.scatter(
-        points_2d[sample_indices, 0].cpu(),
-        points_2d[sample_indices, 1].cpu(),
-        c="gray",
-        alpha=0.5,
-        s=50,
-    )
-    plt.scatter(
-        centroids_2d[:, 0].cpu(),
-        centroids_2d[:, 1].cpu(),
-        c="red",
-        marker="x",
-        s=200,
-        linewidths=3,
-    )
-    plt.title(f"Clustering Progress - Initial State")
-    plt.savefig(f"clustering_progress/cluster_iter_0.png")
-    plt.close()
-
-    for iter_num in trange(numClusteringIters, desc="Clustering Data"):
+    for _ in trange(numClusteringIters, desc="Clustering Data"):
         # Calculate distances from data points to centroids
         distances = torch.cdist(points, centroids)
 
@@ -88,40 +42,57 @@ def trainClustersRender():
             if torch.sum(labels == i) > 0:
                 centroids[i] = torch.mean(points[labels == i], dim=0)
 
-        # Update 2D centroids for visualization
-        if points.shape[1] > 2:
-            centroids_2d = torch.tensor(
-                pca.transform(centroids.cpu().numpy()), device=device
-            )
+    return centroids, points
 
-        # Plot current state
-        plt.figure(figsize=(10, 10))
 
-        # Plot sample points colored by their cluster
-        scatter = plt.scatter(
-            points_2d[sample_indices, 0].cpu(),
-            points_2d[sample_indices, 1].cpu(),
-            c=labels[sample_indices].cpu(),
-            cmap="tab10",
-            alpha=0.5,
-            s=50,
+def renderKMeans(centroids, points):
+    numSamplePoints = min(numClusteringRenderPoints, len(points))
+    sampleIndices = random.sample(range(len(points)), numSamplePoints)
+
+    # Perform PCA if dimensions > 2
+    if points.shape[1] > 2:
+        pca = PCA(n_components=2)
+        pca = pca.fit(points.cpu().numpy())
+        centroids_2d = pca.transform(centroids.cpu().numpy())
+        centroids_2d = torch.tensor(centroids_2d, device=device)
+        points_2d = pca.fit_transform(points[sampleIndices].cpu().numpy())
+        points_2d = torch.tensor(points_2d, device=device)
+    else:
+        centroids_2d = centroids.cpu().numpy()
+        points_2d = points[sampleIndices].cpu().numpy()
+
+    os.makedirs(f"trainingRuns/{trainingRunNumber}/clusters", exist_ok=True)
+
+    imageNum = (
+        max(
+            int(item.split(".")[0])
+            for item in os.listdir(f"trainingRuns/{trainingRunNumber}/clusters")
         )
+        + 1
+        if len(os.listdir(f"trainingRuns/{trainingRunNumber}/clusters")) > 0
+        else 0
+    )
 
-        # Plot centroids
-        plt.scatter(
-            centroids_2d[:, 0].cpu(),
-            centroids_2d[:, 1].cpu(),
-            c="red",
-            marker="x",
-            s=200,
-            linewidths=3,
-        )
-
-        plt.title(f"Clustering Progress - Iteration {iter_num + 1}")
-        plt.savefig(f"clustering_progress/cluster_iter_{iter_num + 1}.png")
-        plt.close()
-
-    return centroids, labels
+    # Plot initial state
+    plt.figure(figsize=(10, 10))
+    plt.scatter(
+        points_2d[:, 0],
+        points_2d[:, 1],
+        c="gray",
+        alpha=0.5,
+        s=50,
+    )
+    plt.scatter(
+        centroids_2d[:, 0],
+        centroids_2d[:, 1],
+        c="red",
+        marker="x",
+        s=200,
+        linewidths=3,
+    )
+    plt.title(f"Clustering Progress - Epoch {imageNum + 1}")
+    plt.savefig(f"trainingRuns/{trainingRunNumber}/clusters/{imageNum}.png")
+    plt.close()
 
 
 # Optional: Create a GIF from the saved images
@@ -131,28 +102,46 @@ def create_animation():
 
     # Get list of files in correct order
     files = sorted(
-        glob.glob("clustering_progress/cluster_iter_*.png"),
-        key=lambda x: int(x.split("_")[-1].split(".")[0]),
+        os.listdir(f"trainingRuns/{trainingRunNumber}/clusters"),
+        key=lambda x: int(x.split(".")[0]),
     )
 
     # Create GIF
-    images = [imageio.imread(file) for file in files]
+    images = [
+        imageio.imread(f"trainingRuns/{trainingRunNumber}/clusters/{file}")
+        for file in files
+    ]
     imageio.mimsave(
-        "clustering_animation.gif", images, duration=0.5
+        f"trainingRuns/{trainingRunNumber}/clusteringAnimation.gif",
+        images,
+        duration=0.5,
     )  # 0.5 seconds per frame
 
 
 if __name__ == "__main__":
+    trainingRunNumber = int(input("Enter the training run you want to render: "))
+
     batchSize = 2**16
     numDataRows = 5_000_000
     numClusters = 10
-    numClusteringIters = 100
+    numClusteringIters = 10
     numClusteringRenderPoints = 1000
 
     dataset = getDataset(numDataRows)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model: MixedAutoencoder = torch.load("model.pt", weights_only=False)
 
-    trainClustersRender()
+    modelPaths = sorted(
+        os.listdir(f"trainingRuns/{trainingRunNumber}/models"),
+        key=lambda item: int(item.split(".")[0].strip("E")),
+    )
+
+    for i, path in enumerate(modelPaths):
+        print(f"Rendering model {i+1}/{len(modelPaths)}")
+        model: MixedAutoencoder = torch.load(
+            f"trainingRuns/{trainingRunNumber}/models/{path}", weights_only=False
+        ).to(device)
+
+        centroids, points = trainClusters()
+        renderKMeans(centroids, points)
     create_animation()
