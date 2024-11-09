@@ -1,14 +1,10 @@
 from data import CustomDataset, getDataset
-from line_profiler import profile
 from time import perf_counter
 from tqdm import tqdm, trange
 import torch.optim as optim
 import torch.nn as nn
-import random
 import torch
 import os
-
-profile.disable()
 
 
 class MixedAutoencoder(nn.Module):
@@ -83,7 +79,6 @@ class MixedAutoencoder(nn.Module):
         )
         self.continuous_output = nn.Linear(hidden_dims[0], continuous_dim)
 
-    @profile
     def encode(self, categorical_inputs, continuous_input):
         # Process categorical inputs through embeddings
         embedded = []
@@ -98,7 +93,6 @@ class MixedAutoencoder(nn.Module):
         latent = self.encoder(x)
         return latent
 
-    @profile
     def forward(self, categorical_inputs, continuous_input):
         # Encode
         latent = self.encode(categorical_inputs, continuous_input)
@@ -113,8 +107,8 @@ class MixedAutoencoder(nn.Module):
         return cat_outputs, cont_output
 
 
-@profile
 def trainModel():
+    # Get the number of the current training run
     runNumber = (
         max(int(item) for item in os.listdir("trainingRuns")) + 1
         if len(os.listdir("trainingRuns")) > 0
@@ -123,7 +117,7 @@ def trainModel():
     os.makedirs(f"trainingRuns/{runNumber}/models")
 
     for epoch in range(numEpochs):
-        total_loss = 0
+        total_loss = torch.tensor(0, dtype=torch.float32, device=device)
         dataset.shuffle()
         numBatches = dataset.numBatches(batchSize)
         start = perf_counter()
@@ -138,7 +132,7 @@ def trainModel():
             cat_outputs, cont_output = model(cat_inputs, cont_inputs)
 
             # Calculate losses
-            cat_loss = 0.0
+            cat_loss = torch.tensor(0, dtype=torch.float32, device=device)
             for i in range(len(cat_outputs)):
                 cat_loss += cat_criterion(cat_outputs[i], cat_inputs[:, i])
             cont_loss = cont_criterion(cont_output, cont_inputs)
@@ -151,29 +145,32 @@ def trainModel():
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            # Accumulate loss
+            total_loss += loss
 
-        elapsed = perf_counter() - start
-        avg_loss = total_loss / numBatches
+        elapsed = perf_counter() - start  # Get the amount of seconds this epoch took
+        avg_loss = total_loss / numBatches  # Get the average loss for this epoch
 
         print(
             f"Epoch [{epoch+1}/{numEpochs}], Average Loss: {avg_loss:.4f}, {int(numDataRows/elapsed):,} rows/sec"
         )
 
+        with open(f"trainingRuns/{runNumber}/loss.txt", "a", encoding="utf-8") as f:
+            f.write(f"{avg_loss}\n")
+
         torch.save(model, f"trainingRuns/{runNumber}/models/E{epoch+1}.pt")
 
 
-# Example usage:
 if __name__ == "__main__":
     # Settings
     learningRate = 1e-3
     batchSize = 2**16
-    numEpochs = 30
-    numDataRows = 5_000_000
+    numEpochs = 100
+    numDataRows = 2**20
 
     hiddenDims = [64, 32]
     embeddingDim = 8
-    latentDim = 2
+    latentDim = 8
 
     numClusters = 5
     numClusteringIters = 100
@@ -188,8 +185,12 @@ if __name__ == "__main__":
     print(f"  # Clusters: {numClusters}")
     print(f"  # Clustering Iters: {numClusteringIters}")
 
-    dataset = getDataset(numDataRows)
+    # Init device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using {device}")
 
+    # Get data
+    dataset: CustomDataset = getDataset(numDataRows, device)
     print(f"{numDataRows:,} rows of data")
 
     # Initialize model
@@ -199,18 +200,13 @@ if __name__ == "__main__":
         embedding_dim=embeddingDim,  # Embedding dimension
         hidden_dims=hiddenDims,  # Hidden layer dimensions
         latent_dim=latentDim,  # Latent space dimension
-    )
+    ).to(device)
     print(f"Model has {sum(p.numel() for p in model.parameters()):,} parameters")
 
     # Initialize optimizer and loss functions
     optimizer = optim.Adam(model.parameters(), lr=learningRate)
     cat_criterion = nn.CrossEntropyLoss()
     cont_criterion = nn.MSELoss()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using {device}")
-
-    model = model.to(device)
 
     # Train model
     trainModel()

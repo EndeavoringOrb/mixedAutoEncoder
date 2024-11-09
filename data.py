@@ -4,7 +4,7 @@ import torch
 
 class CustomDataset:
     def __init__(
-        self, categorical_data, continuous_data, categoricalDims, continuousDim
+        self, categorical_data, continuous_data, categoricalDims, continuousDim, device
     ):
         """
         categorical_data: list of numpy arrays, one for each categorical feature
@@ -15,9 +15,9 @@ class CustomDataset:
         self.categorical_data = [
             torch.tensor(cat, dtype=torch.int8) for cat in categorical_data
         ]
-        self.categorical_data = torch.stack(self.categorical_data, dim=-1)
-        self.continuous_data = torch.tensor(continuous_data, dtype=torch.float32)
-        self.length = len(self.categorical_data)
+        self.categorical_data = torch.stack(self.categorical_data, dim=-1).to(device)
+        self.continuous_data = torch.tensor(continuous_data, dtype=torch.float32).to(device)
+        self.length = self.categorical_data.shape[0]
 
     def shuffle(self):
         r = torch.randperm(self.length)
@@ -43,7 +43,7 @@ class CustomDataset:
         return int(np.ceil(self.length / batchSize))
 
 
-def getDataset(numRows):
+def getDataset(numRows, device):
     categoricalDims = [6, 4, 3, 16, 4, 6]  # categorical
     categoricalDims += [2] * 10  # boolean
     continuousDim = 30  # continuous
@@ -56,7 +56,7 @@ def getDataset(numRows):
 
     # Create dataset and dataloader
     dataset: CustomDataset = CustomDataset(
-        categoricalData, continuousData, categoricalDims, continuousDim
+        categoricalData, continuousData, categoricalDims, continuousDim, device
     )
 
     return dataset

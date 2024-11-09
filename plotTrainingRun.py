@@ -13,9 +13,7 @@ def trainClusters():
     # Get all points
     numBatches = dataset.numBatches(batchSize)
     points = []
-    for cat_inputs, cont_inputs in tqdm(
-        dataset.iter(batchSize), desc=f"Getting Points", total=numBatches
-    ):
+    for cat_inputs, cont_inputs in dataset.iter(batchSize):
         # Move inputs to device
         cat_inputs = cat_inputs.to(device)
         cont_inputs = cont_inputs.to(device)
@@ -30,7 +28,7 @@ def trainClusters():
     startPointIndices = random.sample(range(len(points)), numClusters)
     centroids = points[startPointIndices]
 
-    for _ in trange(numClusteringIters, desc="Clustering Data"):
+    for _ in range(numClusteringIters):
         # Calculate distances from data points to centroids
         distances = torch.cdist(points, centroids)
 
@@ -54,9 +52,7 @@ def renderKMeans(centroids, points):
         pca = PCA(n_components=2)
         pca = pca.fit(points.cpu().numpy())
         centroids_2d = pca.transform(centroids.cpu().numpy())
-        centroids_2d = torch.tensor(centroids_2d, device=device)
-        points_2d = pca.fit_transform(points[sampleIndices].cpu().numpy())
-        points_2d = torch.tensor(points_2d, device=device)
+        points_2d = pca.transform(points[sampleIndices].cpu().numpy())
     else:
         centroids_2d = centroids.cpu().numpy()
         points_2d = points[sampleIndices].cpu().numpy()
@@ -118,26 +114,51 @@ def create_animation():
     )  # 0.5 seconds per frame
 
 
+def plotLoss():
+    with open(f"trainingRuns/{trainingRunNumber}/loss.txt", "r", encoding="utf-8") as f:
+        lines = f.read().strip().splitlines()
+    values = [float(item) for item in lines]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(values, "b-", label="Loss")
+    plt.title("Training Loss")
+    plt.xlabel("Steps")
+    plt.ylabel("Loss")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.legend()
+
+    # Optional: Add some styling
+    plt.yscale("log")  # Use log scale if loss varies by orders of magnitude
+    plt.margins(x=0.02)  # Reduce margins
+
+    # Save the plot
+    plt.savefig(f"trainingRuns/{trainingRunNumber}/lossPlot.png")
+    plt.close()
+
+
 if __name__ == "__main__":
-    trainingRunNumber = int(input("Enter the training run you want to render: "))
+    trainingRunNumber = int(input("Enter the training run you want to plot: "))
 
     batchSize = 2**16
-    numDataRows = 5_000_000
+    numDataRows = 2**20
     numClusters = 10
     numClusteringIters = 10
     numClusteringRenderPoints = 1000
 
-    dataset = getDataset(numDataRows)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    dataset = getDataset(numDataRows, device)
 
     modelPaths = sorted(
         os.listdir(f"trainingRuns/{trainingRunNumber}/models"),
         key=lambda item: int(item.split(".")[0].strip("E")),
     )
 
-    for i, path in enumerate(modelPaths):
-        print(f"Rendering model {i+1}/{len(modelPaths)}")
+    # Plot loss
+    plotLoss()
+
+    # Plot clustering
+    for i, path in enumerate(tqdm(modelPaths, desc="Clustering Models")):
         model: MixedAutoencoder = torch.load(
             f"trainingRuns/{trainingRunNumber}/models/{path}", weights_only=False
         ).to(device)
